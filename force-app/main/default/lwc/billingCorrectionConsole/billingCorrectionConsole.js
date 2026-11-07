@@ -330,7 +330,7 @@ export default class BillingCorrectionConsole extends LightningElement {
 
     handlePrepareDuplicate() {
         if (!this.hasZeroSourceSelection) {
-            this.errorMessage = 'Select one or more locked reversal lines in the second column as bundle references.';
+            this.errorMessage = 'Select one or more eligible locked lines in the second column to duplicate.';
             return;
         }
         const hasUnsavedEdits = this.lineRows
@@ -356,7 +356,7 @@ export default class BillingCorrectionConsole extends LightningElement {
                 quoteId: this.recordId,
                 zeroSourceLineIdsJson: selectedIdsJson
             }));
-            this.completionMessage = 'CPQ is copying the matching positive lines and setting their Qty to zero; locked reversal lines will remain unchanged…';
+            this.completionMessage = 'CPQ is duplicating the selected locked bundles, zeroing original Qty, and calculating the amendment…';
             const firstPass = await this.waitForCalculation(previousTimestamp);
             this.review = firstPass;
 
@@ -365,7 +365,7 @@ export default class BillingCorrectionConsole extends LightningElement {
                 quoteEndDate: firstPass.suggestedEndDate || this.quoteEndDate,
                 changesJson: '[]'
             });
-            this.completionMessage = 'The first CPQ calculation finished. Applying final copied line prices and MRR…';
+            this.completionMessage = 'The first CPQ calculation finished. Applying final duplicated line prices and MRR…';
             const finalReview = await this.waitForCalculation(firstPass.lastCalculatedOn);
             this.review = finalReview;
             this.quoteEndDate = finalReview.suggestedEndDate;
@@ -374,9 +374,9 @@ export default class BillingCorrectionConsole extends LightningElement {
             this.zeroSourceLineIds = [];
             this.showDuplicateReview = false;
             this.confirmed = false;
-            this.completionMessage = `CPQ completed both calculations. It copied ${result.duplicatedLineCount} matched positive lines and zeroed those positive Qty values. Locked reversal lines remain unchanged. Review the saved Qty, Effective Quantity, Net Total, and MRR below.`;
+            this.completionMessage = `CPQ completed both calculations. It duplicated ${result.duplicatedLineCount} selected locked lines and set the original Qty values to zero. Review the saved Qty, Effective Quantity, Net Total, and MRR below.`;
             this.dispatchEvent(new ShowToastEvent({
-                title: 'Matched positive lines copied and zeroed',
+                title: 'Locked bundle duplicated and originals zeroed',
                 message: this.completionMessage,
                 variant: 'success'
             }));

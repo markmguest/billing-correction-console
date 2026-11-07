@@ -9,6 +9,9 @@ public with sharing class BillingCorrectionController {
         Decimal totalMrr = 0;
         for (SBQQ__QuoteLine__c line : lines) {
             Boolean original = line.SBQQ__Existing__c == true;
+            Boolean canZeroSource = original &&
+                line.SBQQ__Quantity__c != null && line.SBQQ__Quantity__c > 0 &&
+                line.SBQQ__EffectiveQuantity__c == 0;
             Boolean isToolCopy = String.isNotBlank(line.Billing_Correction_Clone_Source_Id__c);
             Date startDate = line.SBQQ__EffectiveStartDate__c != null
                 ? line.SBQQ__EffectiveStartDate__c : line.SBQQ__StartDate__c;
@@ -20,12 +23,12 @@ public with sharing class BillingCorrectionController {
                 'id' => line.Id,
                 'name' => line.Name,
                 'productName' => line.SBQQ__Product__r == null ? 'Unknown product' : line.SBQQ__Product__r.Name,
-                'role' => original ? 'Reversal' : (isToolCopy ? 'Copied line' : 'New line'),
+                'role' => original ? 'Existing (locked)' : (isToolCopy ? 'Copied line' : 'New line'),
                 'original' => original,
                 'editable' => !original,
                 'isToolCopy' => isToolCopy,
                 'cloneSourceId' => line.Billing_Correction_Clone_Source_Id__c,
-                'canZeroSource' => original,
+                'canZeroSource' => canZeroSource,
                 'quantity' => line.SBQQ__Quantity__c,
                 'effectiveQuantity' => line.SBQQ__EffectiveQuantity__c,
                 'parentLineId' => line.SBQQ__RequiredBy__c,
@@ -192,7 +195,7 @@ public with sharing class BillingCorrectionController {
             'lineCount' => calculatedLines == null ? 0 : calculatedLines.size(),
             'duplicatedLineCount' => copiedLineCount,
             'zeroedLineCount' => copiedLineCount,
-            'status' => 'CPQ queued copies of the matched new lines and set those matched source quantities to zero. Existing locked reversal lines were left unchanged; the draft quote is not ordered.'
+            'status' => 'CPQ copied the selected locked bundles as new lines and set the original quantities to zero. Review the draft quote; it was not ordered.'
         });
     }
 
@@ -249,14 +252,14 @@ public with sharing class BillingCorrectionController {
 
     private static Set<Id> parseSelectedLineIds(String selectedLineIdsJson) {
         if (String.isBlank(selectedLineIdsJson)) {
-            throw new AuraHandledException('Select one or more new quote lines first.');
+            throw new AuraHandledException('Select one or more locked existing quote lines with an unchanged positive quantity.');
         }
         Set<Id> selectedIds = new Set<Id>();
         for (Object rawId : (List<Object>) JSON.deserializeUntyped(selectedLineIdsJson)) {
             Id lineId = rawId == null ? null : Id.valueOf(String.valueOf(rawId));
             if (lineId != null) selectedIds.add(lineId);
         }
-        if (selectedIds.isEmpty()) throw new AuraHandledException('Select one or more new quote lines first.');
+        if (selectedIds.isEmpty()) throw new AuraHandledException('Select one or more locked existing quote lines with an unchanged positive quantity.');
         return selectedIds;
     }
 
@@ -286,7 +289,10 @@ public with sharing class BillingCorrectionController {
         for (Id selectedId : selectedIds) {
             SBQQ__QuoteLine__c persisted = persistedById.get(selectedId);
             if (persisted == null || persisted.SBQQ__Existing__c != true) {
-                throw new AuraHandledException('For this action, select only the locked existing reversal lines in the second selector column.');
+                throw new AuraHandledException('Select only locked existing lines in the duplicate-and-zero column.');
+            }
+            if (persisted.SBQQ__Quantity__c == null || persisted.SBQQ__Quantity__c <= 0) {
+                throw new AuraHandledException('Only unchanged locked lines with a positive quantity can be duplicated. Refresh the quote and select an eligible bundle.');
             }
             Map<String, Object> line = linesById.get(selectedId);
             if (line == null) throw new AuraHandledException('A selected line was not found in the CPQ quote model. Refresh and try again.');
@@ -300,51 +306,32 @@ public with sharing class BillingCorrectionController {
             }
             Map<String, Object> rootRecord = (Map<String, Object>) linesByKey.get(rootKey).get('record');
             if (rootRecord.get('SBQQ__Existing__c') != true) {
-                throw new AuraHandledException('The selected locked line is not part of an existing reversal group.');
+                throw new AuraHandledException('The selected line is not part of a locked existing bundle.');
             }
             selectedLockedRootKeys.add(rootKey);
         }
 
-        Set<Integer> positiveTargetKeys = new Set<Integer>();
+        Set<Integer> lockedSourceKeys = new Set<Integer>();
         for (Integer lockedRootKey : selectedLockedRootKeys) {
             Set<Integer> lockedGroup = collectGroupKeys(lockedRootKey, lineItems, linesByKey, true);
-            String lockedSignature = groupSignature(lockedGroup, linesByKey);
-            Set<Integer> matchingPositiveRoots = new Set<Integer>();
-            for (Object rawLine : lineItems) {
-                Map<String, Object> candidate = (Map<String, Object>) rawLine;
-                if (asInteger(candidate.get('parentItemKey')) != null) continue;
-                Map<String, Object> candidateRecord = (Map<String, Object>) candidate.get('record');
-                if (candidateRecord.get('SBQQ__Existing__c') == true) continue;
-                Integer candidateRootKey = asInteger(candidate.get('key'));
-                Set<Integer> candidateGroup = collectGroupKeys(candidateRootKey, lineItems, linesByKey, false);
-                if (groupSignature(candidateGroup, linesByKey) != lockedSignature) continue;
-                Boolean allPositive = true;
-                for (Integer groupKey : candidateGroup) {
-                    Map<String, Object> groupRecord = (Map<String, Object>) linesByKey.get(groupKey).get('record');
-                    if (asDecimal(groupRecord.get('SBQQ__Quantity__c')) == null ||
-                        asDecimal(groupRecord.get('SBQQ__Quantity__c')) <= 0) {
-                        allPositive = false;
-                        break;
-                    }
+            for (Integer groupKey : lockedGroup) {
+                Map<String, Object> groupRecord = (Map<String, Object>) linesByKey.get(groupKey).get('record');
+                Decimal groupQuantity = asDecimal(groupRecord.get('SBQQ__Quantity__c'));
+                Decimal effectiveQuantity = asDecimal(groupRecord.get('SBQQ__EffectiveQuantity__c'));
+                if (groupRecord.get('SBQQ__Existing__c') != true ||
+                    groupQuantity == null || groupQuantity <= 0 || effectiveQuantity != 0) {
+                    throw new AuraHandledException('Every line in the selected bundle must be an unchanged locked line with a positive quantity. Refresh and select an eligible bundle.');
                 }
-                if (allPositive) matchingPositiveRoots.add(candidateRootKey);
+                lockedSourceKeys.add(groupKey);
             }
-            if (matchingPositiveRoots.isEmpty()) {
-                throw new AuraHandledException('No positive new product or bundle matches the selected locked lines.');
-            }
-            if (matchingPositiveRoots.size() > 1) {
-                throw new AuraHandledException('More than one positive new bundle matches these locked lines. Resolve the duplicate positive groups first, then retry.');
-            }
-            Integer matchingRootKey = matchingPositiveRoots.iterator().next();
-            positiveTargetKeys.addAll(collectGroupKeys(matchingRootKey, lineItems, linesByKey, false));
         }
 
         List<Map<String, Object>> sourceLines = new List<Map<String, Object>>();
         for (Object rawLine : lineItems) {
             Map<String, Object> line = (Map<String, Object>) rawLine;
-            if (positiveTargetKeys.contains(asInteger(line.get('key')))) sourceLines.add(line);
+            if (lockedSourceKeys.contains(asInteger(line.get('key')))) sourceLines.add(line);
         }
-        if (sourceLines.isEmpty()) throw new AuraHandledException('No eligible new quote lines were found.');
+        if (sourceLines.isEmpty()) throw new AuraHandledException('No eligible locked bundle lines were found.');
 
         Integer nextKey = asInteger(quoteModel.get('nextKey'));
         if (nextKey == null) throw new AuraHandledException('The CPQ quote model is missing its next line key.');
@@ -357,6 +344,8 @@ public with sharing class BillingCorrectionController {
         for (Map<String, Object> sourceLine : sourceLines) {
             Map<String, Object> sourceRecord = (Map<String, Object>) sourceLine.get('record');
             Decimal sourceQuantity = asDecimal(sourceRecord.get('SBQQ__Quantity__c'));
+            Id sourceLineId = sourceRecord.get('Id') == null
+                ? null : Id.valueOf(String.valueOf(sourceRecord.get('Id')));
             sourceRecord.put('SBQQ__Quantity__c', 0);
 
             Map<String, Object> copyLine = (Map<String, Object>) JSON.deserializeUntyped(JSON.serialize(sourceLine));
@@ -365,9 +354,18 @@ public with sharing class BillingCorrectionController {
             copyRecord.remove('Name');
             copyRecord.remove('SBQQ__Number__c');
             copyRecord.remove('SBQQ__RequiredBy__r');
+            copyRecord.remove('SBQQ__UpgradedSubscription__r');
+            copyRecord.remove('SBQQ__RenewedSubscription__r');
+            copyRecord.remove('SBQQ__RenewedAsset__r');
+            copyRecord.remove('SBQQ__OriginalSource__r');
             copyRecord.put('SBQQ__Existing__c', false);
             copyRecord.put('SBQQ__Quantity__c', sourceQuantity);
-            copyRecord.put('Billing_Correction_Clone_Source_Id__c', String.valueOf(sourceRecord.get('Id')));
+            copyRecord.put('SBQQ__UpgradedSubscription__c', null);
+            copyRecord.put('SBQQ__RenewedSubscription__c', null);
+            copyRecord.put('SBQQ__RenewedAsset__c', null);
+            copyRecord.put('SBQQ__OriginalSource__c', null);
+            copyRecord.put('SBQQ__OriginalQuoteLineId__c', null);
+            copyRecord.put('Billing_Correction_Clone_Source_Id__c', String.valueOf(sourceLineId));
             if (copyRecord.containsKey('SBQQ__RequiredBy__c')) copyRecord.put('SBQQ__RequiredBy__c', null);
 
             Integer oldKey = asInteger(sourceLine.get('key'));
@@ -405,35 +403,6 @@ public with sharing class BillingCorrectionController {
         return groupKeys;
     }
 
-    private static String groupSignature(
-        Set<Integer> groupKeys,
-        Map<Integer, Map<String, Object>> linesByKey
-    ) {
-        List<String> components = new List<String>();
-        for (Integer key : groupKeys) {
-            Map<String, Object> line = linesByKey.get(key);
-            Map<String, Object> record = (Map<String, Object>) line.get('record');
-            List<String> ancestry = new List<String>();
-            Integer parentKey = asInteger(line.get('parentItemKey'));
-            while (parentKey != null) {
-                Map<String, Object> parent = linesByKey.get(parentKey);
-                Map<String, Object> parentRecord = (Map<String, Object>) parent.get('record');
-                ancestry.add(String.valueOf(parentRecord.get('SBQQ__Product__c')));
-                parentKey = asInteger(parent.get('parentItemKey'));
-            }
-            String path = '';
-            for (Integer index = ancestry.size() - 1; index >= 0; index--) {
-                path += (path == '' ? '' : '/') + ancestry[index];
-            }
-            String productId = String.valueOf(record.get('SBQQ__Product__c'));
-            String optionId = record.get('SBQQ__ProductOption__c') == null
-                ? '' : String.valueOf(record.get('SBQQ__ProductOption__c'));
-            String isBundle = String.valueOf(record.get('SBQQ__Bundle__c'));
-            components.add(path + '>' + productId + ':' + optionId + ':' + isBundle);
-        }
-        components.sort();
-        return String.join(components, '|');
-    }
     @TestVisible
     private static Decimal targetAdditionalDiscountPercent(
         Decimal targetNetTotal,

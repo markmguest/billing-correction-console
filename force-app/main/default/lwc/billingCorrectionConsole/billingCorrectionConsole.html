@@ -16,7 +16,7 @@
             <template lwc:if={review}>
                 <p class="slds-m-bottom_small"><strong>{review.quoteName}</strong> · {review.quoteStatus} amendment</p>
                 <p class="slds-text-body_small slds-m-bottom_medium">
-                    Use the first column to select new lines for editing. Use the second column to select only locked reversal lines as bundle references for the copy-and-zero action. Selecting any locked line selects its entire locked bundle; CPQ then finds the matching positive new bundle automatically. Effective Quantity is read-only. The quote end date changes here; the contract end date remains manual. Refresh reloads saved data only and does not run CPQ calculation.
+                    Use the first column to select positive lines for editing. Use the second column to select locked existing lines to duplicate and zero. Selecting any locked line selects its entire locked bundle. This works even when the amendment has no positive lines yet. Effective Quantity is read-only. The quote end date changes here; the contract end date remains manual. Refresh reloads saved data only and does not run CPQ calculation.
                 </p>
 
                 <div class="slds-grid slds-wrap slds-gutters_small slds-m-bottom_medium">
@@ -67,8 +67,8 @@
                                 <div class="slds-text-body_small">Edit new lines</div>
                             </th>
                             <th scope="col" class="slds-cell-shrink">
-                                <lightning-input type="checkbox" label="Select all locked reversal lines as bundle references" variant="label-hidden" checked={allZeroSourcesSelected} onchange={handleSelectZeroSources}></lightning-input>
-                                <div class="slds-text-body_small">Locked bundle references</div>
+                                <lightning-input type="checkbox" label="Select all eligible locked lines to duplicate" variant="label-hidden" checked={allZeroSourcesSelected} onchange={handleSelectZeroSources}></lightning-input>
+                                <div class="slds-text-body_small">Locked lines to duplicate</div>
                             </th>
                             <th scope="col"><div class="slds-truncate">Line / product</div></th>
                             <th scope="col"><div class="slds-truncate">Type</div></th>
@@ -91,10 +91,10 @@
                                     </td>
                                     <td>
                                         <template lwc:if={line.canZeroSource}>
-                                            <lightning-input type="checkbox" label="Select locked reversal line as bundle reference" variant="label-hidden" data-line-id={line.id} checked={line.zeroSourceSelected} onchange={handleSelectZeroSourceLine}></lightning-input>
+                                            <lightning-input type="checkbox" label="Select locked line to duplicate" variant="label-hidden" data-line-id={line.id} checked={line.zeroSourceSelected} onchange={handleSelectZeroSourceLine}></lightning-input>
                                         </template>
                                         <template lwc:elseif={line.isToolCopy}><span class="slds-text-body_small">Copied</span></template>
-                                        <template lwc:elseif={line.editable}><span class="slds-text-body_small">Positive line; matched automatically</span></template>
+                                        <template lwc:elseif={line.editable}><span class="slds-text-body_small">Positive line; editing only</span></template>
                                         <template lwc:else>—</template>
                                     </td>
                                     <td><div>{line.name}</div><div class="slds-text-body_small">{line.productName}</div></td>
@@ -143,7 +143,7 @@
 
                 <template lwc:if={hasZeroSourceSelection}>
                     <div class="slds-m-top_small slds-m-bottom_small">
-                        <lightning-button label="Copy matched new lines, then zero their Qty" onclick={handlePrepareDuplicate} disabled={duplicateButtonDisabled}></lightning-button>
+                        <lightning-button label="Duplicate locked bundle, zero original Qty, and calculate" onclick={handlePrepareDuplicate} disabled={duplicateButtonDisabled}></lightning-button>
                     </div>
                 </template>
 
@@ -152,7 +152,7 @@
                 </template>
                 <template lwc:else>
                     <div class="slds-box slds-theme_info slds-m-top_small" role="status">
-                        This amendment currently contains only existing lines; no new replacement lines are present. To test the new-line controls, open the amendment that includes both reversals and replacement lines, or add replacement products in CPQ and refresh.
+                        This amendment currently contains only locked existing lines. You can still select an eligible bundle in the second column to duplicate it and set the original lines Qty to zero.
                     </div>
                 </template>
 
@@ -176,13 +176,13 @@
 
                 <template lwc:if={showDuplicateReview}>
                     <div class="slds-box slds-theme_warning slds-m-top_medium">
-                        Review this draft operation: the checked locked reversal lines identify the product or bundle. CPQ finds the matching positive new line group, copies it, sets the matched positive lines Qty to zero, and calculates the amendment twice. Selecting any locked line selects its complete locked bundle, including option lines. The locked reversal lines remain unchanged. New lines in the first column are only for editing; they are not selected as the copy-and-zero target. The quote remains a draft and is not ordered.
+                        Review this draft operation: the checked locked existing lines identify the product or bundle to duplicate. The tool copies those selected bundle lines, sets the original lines Qty to zero, clears old subscription links from the copies, and calculates the amendment twice. Selecting any locked line selects its complete locked bundle, including option lines. Positive lines in the first column are only for editing. The quote remains a draft and is not ordered.
                     </div>
                     <lightning-input class="slds-m-top_medium" type="checkbox" name="confirmation"
-                        label="I reviewed the locked bundle references and confirm copying the matched positive lines and setting those positive Qty values to zero."
+                        label="I reviewed this operation and confirm duplicating the selected locked bundle, setting original Qty to zero, and calculating the draft amendment."
                         onchange={handleConfirm}></lightning-input>
                     <div class="slds-m-top_medium">
-                        <lightning-button variant="brand" label="Copy matching bundle, zero positive Qty, and calculate" onclick={handleDuplicateAndZero} disabled={duplicateSaveButtonDisabled}></lightning-button>
+                        <lightning-button variant="brand" label="Duplicate locked bundle, zero original Qty, and calculate" onclick={handleDuplicateAndZero} disabled={duplicateSaveButtonDisabled}></lightning-button>
                     </div>
                 </template>
 
