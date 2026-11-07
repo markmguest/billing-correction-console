@@ -61,12 +61,12 @@ private class BillingCorrectionControllerTest {
     }
 
     @IsTest
-    static void rejectsReplacementWithoutMatchingOriginalProduct() {
+    static void acceptsReplacementBundleWithDifferentProducts() {
         List<SBQQ__QuoteLine__c> lines = new List<SBQQ__QuoteLine__c>{
             new SBQQ__QuoteLine__c(
                 SBQQ__Product__c = '01t1M00000NIMM3QAP',
                 SBQQ__Existing__c = true,
-                SBQQ__Quantity__c = 0
+                SBQQ__Quantity__c = 1
             ),
             new SBQQ__QuoteLine__c(
                 SBQQ__Product__c = '01t1M00000NIT30QAH',
@@ -74,13 +74,25 @@ private class BillingCorrectionControllerTest {
                 SBQQ__Quantity__c = 1
             )
         };
+        BillingCorrectionController.validateLinePairs(lines);
+        System.assert(true, 'A new plan bundle may replace an existing product bundle.');
+    }
+
+    @IsTest
+    static void rejectsNewLinesWithoutAnyExistingAmendmentLine() {
         Boolean rejected = false;
         try {
-            BillingCorrectionController.validateLinePairs(lines);
+            BillingCorrectionController.validateLinePairs(new List<SBQQ__QuoteLine__c>{
+                new SBQQ__QuoteLine__c(
+                    SBQQ__Product__c = '01t1M00000NIT30QAH',
+                    SBQQ__Existing__c = false,
+                    SBQQ__Quantity__c = 1
+                )
+            });
         } catch (AuraHandledException ex) {
             rejected = true;
         }
-        System.assert(rejected, 'A new line must match a product with an original line.');
+        System.assert(rejected, 'New replacement lines still require a locked existing line on the amendment.');
     }
 
     @IsTest

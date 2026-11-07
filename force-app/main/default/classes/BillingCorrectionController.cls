@@ -456,22 +456,25 @@ public with sharing class BillingCorrectionController {
 
     @TestVisible
     private static void validateLinePairs(List<SBQQ__QuoteLine__c> lines) {
-        Set<String> originalProducts = new Set<String>();
-        Set<String> newProducts = new Set<String>();
+        Boolean hasExistingLine = false;
+        Boolean hasNewLine = false;
         for (SBQQ__QuoteLine__c line : lines) {
-            if (line.SBQQ__Product__c == null) throw new AuraHandledException('Every amendment line must have a product.');
-            String productId = String.valueOf(line.SBQQ__Product__c);
+            if (line.SBQQ__Product__c == null) {
+                throw new AuraHandledException('Every amendment line must have a product.');
+            }
             if (line.SBQQ__Existing__c == true) {
-                // CPQ keeps the source subscription quantity on existing amendment lines.
-                // The reversal is represented by EffectiveQuantity, not necessarily Quantity = 0.
-                originalProducts.add(productId);
+                // CPQ keeps source subscriptions as locked amendment lines.
+                // Different replacement products are valid on a plan replacement.
+                hasExistingLine = true;
             } else {
-                if (line.SBQQ__Quantity__c == null || line.SBQQ__Quantity__c < 0)
+                hasNewLine = true;
+                if (line.SBQQ__Quantity__c == null || line.SBQQ__Quantity__c < 0) {
                     throw new AuraHandledException('A new line cannot have a negative effective quantity.');
-                newProducts.add(productId);
+                }
             }
         }
-        if (originalProducts.isEmpty() || !originalProducts.containsAll(newProducts))
-            throw new AuraHandledException('New lines must match products that have an original reversal line.');
+        if (hasNewLine && !hasExistingLine) {
+            throw new AuraHandledException('This amendment needs at least one locked existing line before replacement lines can be changed.');
+        }
     }
 }
