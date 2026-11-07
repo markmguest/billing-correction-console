@@ -1,0 +1,195 @@
+<template>
+    <lightning-card title="Billing Correction Console" icon-name="utility:edit">
+        <div class="slds-p-around_small">
+            <template lwc:if={isLoading}>
+                <lightning-spinner alternative-text="Loading amendment"></lightning-spinner>
+            </template>
+            <template lwc:if={errorMessage}>
+                <div class="slds-notify slds-notify_alert slds-alert_error slds-m-bottom_medium" role="alert">{errorMessage}</div>
+            </template>
+            <template lwc:if={isSaving}>
+                <div class="slds-is-relative slds-p-vertical_medium" role="status">
+                    <lightning-spinner alternative-text="CPQ is calculating line prices"></lightning-spinner>
+                    <p class="slds-text-align_center slds-p-top_xx-large">{completionMessage}</p>
+                </div>
+            </template>
+            <template lwc:if={review}>
+                <p class="slds-m-bottom_small"><strong>{review.quoteName}</strong> · {review.quoteStatus} amendment</p>
+                <p class="slds-text-body_small slds-m-bottom_medium">
+                    Use the first column to select new lines for editing. Use the second column to select only locked reversal lines as bundle references for the copy-and-zero action. Selecting any locked line selects its entire locked bundle; CPQ then finds the matching positive new bundle automatically. Effective Quantity is read-only. The quote end date changes here; the contract end date remains manual. Refresh reloads saved data only and does not run CPQ calculation.
+                </p>
+
+                <div class="slds-grid slds-wrap slds-gutters_small slds-m-bottom_medium">
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-3">
+                        <lightning-input data-validate type="date" name="quoteEndDate" label="Quote end date only"
+                            value={quoteEndDate} onchange={handleQuoteEndDateChange} required></lightning-input>
+                    </div>
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-3">
+                        <div class="slds-text-title">Current total MRR (all quote lines)</div>
+                        <lightning-formatted-number value={review.totalMrr} format-style="currency" currency-code="USD"></lightning-formatted-number>
+                        <div class="slds-text-body_small">Includes negative reversal-line MRR.</div>
+                    </div>
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-3">
+                        <div class="slds-text-title">New lines selected for editing / Locked reversal references</div>
+                        <div>{selectedCount} / {zeroSourceSelectedCount}</div>
+                    </div>
+                </div>
+
+                <template lwc:if={hasSelectedLines}>
+                    <div class="slds-box slds-theme_shade slds-m-bottom_small">
+                        <div class="slds-text-title_bold slds-m-bottom_x-small">Apply common values to selected lines</div>
+                        <div class="slds-grid slds-wrap slds-gutters_small slds-grid_vertical-align-end">
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-4">
+                                <lightning-input type="date" name="bulkStartDate" label="Start date" value={bulkStartDate} onchange={handleBulkChange}></lightning-input>
+                            </div>
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-4">
+                                <lightning-input type="date" name="bulkEndDate" label="End date" value={bulkEndDate} onchange={handleBulkChange}></lightning-input>
+                            </div>
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-4">
+                                <lightning-combobox name="bulkDiscountMode" label="Discount method" value={bulkDiscountMode} options={bulkDiscountOptions} onchange={handleBulkChange}></lightning-combobox>
+                            </div>
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-4">
+                                <lightning-input type="number" name="bulkDiscountValue" label="Common discount value" min="0" max={bulkDiscountMax} step="0.01" value={bulkDiscountValue} onchange={handleBulkChange} disabled={bulkDiscountValueDisabled}></lightning-input>
+                            </div>
+                            <div class="slds-col slds-size_1-of-1 slds-m-top_small">
+                                <lightning-button label="Apply to selected lines" onclick={handleApplyBulk} disabled={bulkApplyDisabled}></lightning-button>
+                                <span class="slds-text-body_small slds-m-left_small">Target Net Total is entered separately on each line.</span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <div class="slds-scrollable_x">
+                    <table class="slds-table slds-table_cell-buffer slds-table_bordered slds-table_fixed-layout">
+                        <thead><tr>
+                            <th scope="col" class="slds-cell-shrink">
+                                <lightning-input type="checkbox" label="Select all new lines for editing" variant="label-hidden" checked={allEditableSelected} onchange={handleSelectAll}></lightning-input>
+                                <div class="slds-text-body_small">Edit new lines</div>
+                            </th>
+                            <th scope="col" class="slds-cell-shrink">
+                                <lightning-input type="checkbox" label="Select all locked reversal lines as bundle references" variant="label-hidden" checked={allZeroSourcesSelected} onchange={handleSelectZeroSources}></lightning-input>
+                                <div class="slds-text-body_small">Locked bundle references</div>
+                            </th>
+                            <th scope="col"><div class="slds-truncate">Line / product</div></th>
+                            <th scope="col"><div class="slds-truncate">Type</div></th>
+                            <th scope="col"><div class="slds-truncate">Qty</div></th>
+                            <th scope="col"><div class="slds-truncate">Effective Quantity</div></th>
+                            <th scope="col"><div class="slds-truncate">Start date</div></th>
+                            <th scope="col"><div class="slds-truncate">End date</div></th>
+                            <th scope="col"><div class="slds-truncate">Discount method / value</div></th>
+                            <th scope="col"><div class="slds-truncate">Saved Net Total</div></th>
+                            <th scope="col"><div class="slds-truncate">Line MRR</div></th>
+                        </tr></thead>
+                        <tbody>
+                            <template for:each={lineRows} for:item="line">
+                                <tr key={line.id}>
+                                    <td>
+                                        <template lwc:if={line.editable}>
+                                            <lightning-input type="checkbox" label="Select new line for editing" variant="label-hidden" data-line-id={line.id} checked={line.selected} onchange={handleSelectLine}></lightning-input>
+                                        </template>
+                                        <template lwc:else>🔒</template>
+                                    </td>
+                                    <td>
+                                        <template lwc:if={line.canZeroSource}>
+                                            <lightning-input type="checkbox" label="Select locked reversal line as bundle reference" variant="label-hidden" data-line-id={line.id} checked={line.zeroSourceSelected} onchange={handleSelectZeroSourceLine}></lightning-input>
+                                        </template>
+                                        <template lwc:elseif={line.isToolCopy}><span class="slds-text-body_small">Copied</span></template>
+                                        <template lwc:elseif={line.editable}><span class="slds-text-body_small">Positive line; matched automatically</span></template>
+                                        <template lwc:else>—</template>
+                                    </td>
+                                    <td><div>{line.name}</div><div class="slds-text-body_small">{line.productName}</div></td>
+                                    <td>{line.role}</td>
+                                    <td>
+                                        <template lwc:if={line.selectedEditable}>
+                                            <lightning-input data-validate data-line-id={line.id} data-field="quantity" type="number" label="Quantity" variant="label-hidden" min="0" step="0.001" value={line.proposedQuantity} onchange={handleLineChange} required></lightning-input>
+                                        </template>
+                                        <template lwc:else>{line.displayQuantity}</template>
+                                    </td>
+                                    <td><lightning-formatted-number value={line.displayEffectiveQuantity} maximum-fraction-digits="3"></lightning-formatted-number></td>
+                                    <td>
+                                        <template lwc:if={line.selectedEditable}>
+                                            <lightning-input data-validate data-line-id={line.id} data-field="startDate" type="date" label="Start date" variant="label-hidden" value={line.proposedStartDate} onchange={handleLineChange} required></lightning-input>
+                                        </template>
+                                        <template lwc:else>{line.startDate}</template>
+                                    </td>
+                                    <td>
+                                        <template lwc:if={line.selectedEditable}>
+                                            <lightning-input data-validate data-line-id={line.id} data-field="endDate" type="date" label="End date" variant="label-hidden" value={line.proposedEndDate} onchange={handleLineChange} required></lightning-input>
+                                        </template>
+                                        <template lwc:else>{line.endDate}</template>
+                                    </td>
+                                    <td>
+                                        <template lwc:if={line.selectedEditable}>
+                                            <lightning-combobox data-line-id={line.id} data-field="discountMode" label="Discount method" variant="label-hidden" value={line.discountMode} options={discountOptions} onchange={handleLineChange}></lightning-combobox>
+                                            <template lwc:if={line.isPercentMode}>
+                                                <lightning-input data-validate data-line-id={line.id} data-field="additionalDiscountPercent" type="number" label="Additional discount percent" variant="label-hidden" min="0" max="100" step="0.01" value={line.proposedDiscountPercent} onchange={handleLineChange} required></lightning-input>
+                                            </template>
+                                            <template lwc:if={line.isAmountMode}>
+                                                <lightning-input data-validate data-line-id={line.id} data-field="additionalDiscountAmount" type="number" label="Additional discount amount per unit" variant="label-hidden" min="0" step="0.01" value={line.proposedDiscountAmount} onchange={handleLineChange} required></lightning-input>
+                                            </template>
+                                            <template lwc:if={line.isTargetMode}>
+                                                <lightning-input data-validate data-line-id={line.id} data-field="targetNetTotal" type="number" label="Target Net Total" variant="label-hidden" min="0" step="0.01" value={line.proposedTargetNetTotal} onchange={handleLineChange} required></lightning-input>
+                                            </template>
+                                        </template>
+                                        <template lwc:else>{line.discountSummary}</template>
+                                    </td>
+                                    <td><lightning-formatted-number value={line.netTotal} format-style="currency" currency-code="USD"></lightning-formatted-number></td>
+                                    <td><lightning-formatted-number value={line.mrr} format-style="currency" currency-code="USD"></lightning-formatted-number></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <template lwc:if={hasZeroSourceSelection}>
+                    <div class="slds-m-top_small slds-m-bottom_small">
+                        <lightning-button label="Copy matched new lines, then zero their Qty" onclick={handlePrepareDuplicate} disabled={duplicateButtonDisabled}></lightning-button>
+                    </div>
+                </template>
+
+                <template lwc:if={hasNewLines}>
+                    <p class="slds-text-body_small slds-m-top_small">New replacement lines are listed with positive effective quantities. Existing reversals can show a negative or zero effective quantity.</p>
+                </template>
+                <template lwc:else>
+                    <div class="slds-box slds-theme_info slds-m-top_small" role="status">
+                        This amendment currently contains only existing lines; no new replacement lines are present. To test the new-line controls, open the amendment that includes both reversals and replacement lines, or add replacement products in CPQ and refresh.
+                    </div>
+                </template>
+
+                <div class="slds-m-top_medium">
+                    <lightning-button label="Review proposed changes" onclick={handleReview} disabled={reviewButtonDisabled}></lightning-button>
+                    <lightning-button class="slds-m-left_small" label="Refresh saved quote data" onclick={refreshReview} disabled={refreshButtonDisabled}></lightning-button>
+                </div>
+                <p class="slds-text-body_small slds-m-top_x-small">Refresh reads the saved quote and line fields again. It does not calculate, save, or change anything.</p>
+
+                <template lwc:if={showReview}>
+                    <div class="slds-box slds-theme_warning slds-m-top_medium">
+                        Review the selected line changes. Target Net Total derives an additional discount percentage, then runs CPQ again after the new dates and quantity have been saved so it can apply that discount to the recalculated term. The final saved Net Total and MRR appear when both passes finish. The quote end date and selected new lines are saved; the contract end date remains unchanged, and the quote is not ordered.
+                    </div>
+                    <lightning-input class="slds-m-top_medium" type="checkbox" name="confirmation"
+                        label="I reviewed these changes and understand this calculates and saves the draft amendment without ordering it."
+                        onchange={handleConfirm}></lightning-input>
+                    <div class="slds-m-top_medium">
+                        <lightning-button variant="brand" label="Calculate and save draft" onclick={handleCalculateAndSave} disabled={saveButtonDisabled}></lightning-button>
+                    </div>
+                </template>
+
+                <template lwc:if={showDuplicateReview}>
+                    <div class="slds-box slds-theme_warning slds-m-top_medium">
+                        Review this draft operation: the checked locked reversal lines identify the product or bundle. CPQ finds the matching positive new line group, copies it, sets the matched positive lines Qty to zero, and calculates the amendment twice. Selecting any locked line selects its complete locked bundle, including option lines. The locked reversal lines remain unchanged. New lines in the first column are only for editing; they are not selected as the copy-and-zero target. The quote remains a draft and is not ordered.
+                    </div>
+                    <lightning-input class="slds-m-top_medium" type="checkbox" name="confirmation"
+                        label="I reviewed the locked bundle references and confirm copying the matched positive lines and setting those positive Qty values to zero."
+                        onchange={handleConfirm}></lightning-input>
+                    <div class="slds-m-top_medium">
+                        <lightning-button variant="brand" label="Copy matching bundle, zero positive Qty, and calculate" onclick={handleDuplicateAndZero} disabled={duplicateSaveButtonDisabled}></lightning-button>
+                    </div>
+                </template>
+
+                <template lwc:if={completionMessage}>
+                    <div class="slds-notify slds-notify_alert slds-alert_success slds-m-top_medium" role="status">{completionMessage} Refresh saved quote data after the CPQ job completes to verify Net Total and MRR.</div>
+                </template>
+            </template>
+        </div>
+    </lightning-card>
+</template>
