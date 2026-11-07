@@ -105,8 +105,8 @@ public with sharing class BillingCorrectionController {
             record.put('SBQQ__EndDate__c', String.valueOf(endDate));
             if (discountMode == 'Percent') {
                 Decimal discountPercent = asDecimal(change.get('additionalDiscountPercent'));
-                if (discountPercent == null || discountPercent < 0 || discountPercent > 100)
-                    throw new AuraHandledException('Enter an additional discount from 0 to 100%.');
+                if (discountPercent == null || discountPercent > 100)
+                    throw new AuraHandledException('Enter an additional discount of 100% or less. A negative percentage increases the price.');
                 record.put('SBQQ__Discount__c', discountPercent);
                 record.put('SBQQ__AdditionalDiscountAmount__c', null);
                 record.put('AdditionalDiscountUnit__c', 'Percent');
@@ -133,9 +133,11 @@ public with sharing class BillingCorrectionController {
                 Decimal netToCustomerRatio = priorNetPrice / priorCustomerPrice;
                 Decimal targetCustomerPrice = (targetNetTotal / quantity) / netToCustomerRatio;
                 Decimal priorProratedListPrice = persisted.SBQQ__ProratedListPrice__c;
-                if (priorProratedListPrice == null || priorProratedListPrice <= 0 || targetCustomerPrice > priorProratedListPrice)
-                    throw new AuraHandledException('The target exceeds this line’s current prorated list price, so an additional discount cannot reach it.');
-                Decimal targetDiscountPercent = ((priorProratedListPrice - targetCustomerPrice) / priorProratedListPrice) * 100;
+                if (priorProratedListPrice == null || priorProratedListPrice <= 0)
+                    throw new AuraHandledException('This line has no positive prorated list price to use as a target basis.');
+                Decimal targetDiscountPercent = targetAdditionalDiscountPercent(
+                    targetNetTotal, quantity, netToCustomerRatio, priorProratedListPrice
+                );
 
                 record.put('SBQQ__Discount__c', targetDiscountPercent);
                 record.put('SBQQ__AdditionalDiscountAmount__c', null);
@@ -431,6 +433,22 @@ public with sharing class BillingCorrectionController {
         }
         components.sort();
         return String.join(components, '|');
+    }
+    @TestVisible
+    private static Decimal targetAdditionalDiscountPercent(
+        Decimal targetNetTotal,
+        Decimal quantity,
+        Decimal netToCustomerRatio,
+        Decimal proratedListPrice
+    ) {
+        if (targetNetTotal == null || targetNetTotal < 0 ||
+            quantity == null || quantity <= 0 ||
+            netToCustomerRatio == null || netToCustomerRatio <= 0 ||
+            proratedListPrice == null || proratedListPrice <= 0) {
+            throw new AuraHandledException('A valid target, quantity, price ratio, and prorated list price are required.');
+        }
+        Decimal targetCustomerPrice = (targetNetTotal / quantity) / netToCustomerRatio;
+        return ((proratedListPrice - targetCustomerPrice) / proratedListPrice) * 100;
     }
     private static Date asDate(Object value) {
         return value == null ? null : Date.valueOf(String.valueOf(value));

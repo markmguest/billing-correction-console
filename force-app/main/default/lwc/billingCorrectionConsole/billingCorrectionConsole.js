@@ -286,8 +286,22 @@ export default class BillingCorrectionConsole extends LightningElement {
     handleReview() {
         const inputs = [...this.template.querySelectorAll('lightning-input[data-validate]')]
             .filter((input) => !input.disabled);
-        const valid = inputs.reduce((allValid, input) => input.reportValidity() && allValid, true);
-        if (!valid) return;
+        let valid = true;
+        let firstInvalid;
+        for (const input of inputs) {
+            if (!input.reportValidity()) {
+                valid = false;
+                if (!firstInvalid) firstInvalid = input;
+            }
+        }
+        if (!valid) {
+            this.errorMessage = 'Review the highlighted line fields. Enter a Target Net Total when that discount method is selected.';
+            requestAnimationFrame(() => {
+                firstInvalid?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                firstInvalid?.focus();
+            });
+            return;
+        }
         for (const line of this.lineRows.filter((item) => item.selectedEditable)) {
             if (line.proposedStartDate > line.proposedEndDate) {
                 this.errorMessage = `Start date must be on or before end date for ${line.productName}.`;
@@ -303,6 +317,11 @@ export default class BillingCorrectionConsole extends LightningElement {
         this.showReview = true;
         this.reviewed = true;
         this.confirmed = false;
+        requestAnimationFrame(() => {
+            const reviewPanel = this.template.querySelector('[data-review-panel]');
+            reviewPanel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            this.template.querySelector('lightning-input[name="confirmation"]')?.focus();
+        });
     }
 
     handleConfirm(event) {

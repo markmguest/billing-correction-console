@@ -1,6 +1,17 @@
 @IsTest
 private class BillingCorrectionControllerTest {
     @IsTest
+    static void calculatesNegativePercentForTargetAboveProratedList() {
+        System.assertEquals(
+            -20,
+            BillingCorrectionController.targetAdditionalDiscountPercent(120, 1, 1, 100)
+        );
+        System.assertEquals(
+            20,
+            BillingCorrectionController.targetAdditionalDiscountPercent(80, 1, 1, 100)
+        );
+    }
+    @IsTest
     static void acceptsMatchedLinesWithDifferentQuantities() {
         List<SBQQ__QuoteLine__c> lines = new List<SBQQ__QuoteLine__c>{
             new SBQQ__QuoteLine__c(
